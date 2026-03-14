@@ -21,3 +21,7 @@ CHANNELS = 1
 CHUNK_SIZE = 1024
 SILENCE_THRESHOLD = 500
 SILENCE_DURATION = 2.0  # seconds of silence before stopping recording
+
+# Barge-in settings (interrupt Jarvis by speaking)
+BARGE_IN_ENABLED = True
+BARGE_IN_THRESHOLD = 1500     # Higher than SILENCE_THRESHOLD to ignore speaker bleed
