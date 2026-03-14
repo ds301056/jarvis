@@ -39,11 +39,17 @@ def query(prompt: str, stream: bool = True) -> str:
     return "".join(full_response)
 
 
-def stream_sentences(prompt: str):
-    """Stream tokens from Ollama, yielding complete sentences as they form.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_CLAUSE_BREAK = re.compile(r"(?<=[,;:\u2014])\s+")
+_MIN_CLAUSE_LEN = 30  # only split on clause breaks when buffer exceeds this
 
-    Prints tokens to stdout for visual feedback, same as query().
-    Yields each sentence once a sentence-ending boundary is detected.
+
+def stream_sentences(prompt: str):
+    """Stream tokens from Ollama, yielding clauses/sentences for TTS.
+
+    Splits on sentence boundaries (.!?) always, and on clause boundaries
+    (,;:—) when the buffered text is long enough. This keeps TTS chunks
+    small (~5-10 words) for low-latency synthesis.
     """
     url = f"{config.OLLAMA_URL}/api/generate"
     payload = {
@@ -52,7 +58,6 @@ def stream_sentences(prompt: str):
         "stream": True,
     }
 
-    sentence_end = re.compile(r"(?<=[.!?])\s+")
     buffer = ""
 
     with requests.post(url, json=payload, stream=True, timeout=120) as resp:
@@ -65,15 +70,26 @@ def stream_sentences(prompt: str):
             print(token, end="", flush=True)
             buffer += token
 
-            # Split on sentence boundaries
+            # Always split on sentence boundaries
             while True:
-                match = sentence_end.search(buffer)
-                if not match:
-                    break
-                sentence = buffer[: match.start() + 1].strip()
-                buffer = buffer[match.end():]
-                if sentence:
-                    yield sentence
+                match = _SENTENCE_END.search(buffer)
+                if match:
+                    sentence = buffer[: match.start() + 1].strip()
+                    buffer = buffer[match.end():]
+                    if sentence:
+                        yield sentence
+                    continue
+
+                # Split on clause boundaries if buffer is long enough
+                if len(buffer) >= _MIN_CLAUSE_LEN:
+                    cmatch = _CLAUSE_BREAK.search(buffer)
+                    if cmatch:
+                        clause = buffer[: cmatch.start() + 1].strip()
+                        buffer = buffer[cmatch.end():]
+                        if clause:
+                            yield clause
+                        continue
+                break
 
             if chunk.get("done"):
                 break

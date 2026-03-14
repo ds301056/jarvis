@@ -19,7 +19,7 @@ def voice_status():
         "whisper_model": config.WHISPER_MODEL,
         "ollama_model": config.OLLAMA_MODEL,
         "tts_enabled": config.TTS_ENABLED,
-        "tts_model": config.TTS_MODEL,
+        "tts_backend": config.TTS_BACKEND,
     }
 
 

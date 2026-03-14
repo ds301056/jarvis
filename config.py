@@ -10,9 +10,10 @@ OLLAMA_MODEL = "llama3.1:8b"
 
 # TTS settings
 TTS_ENABLED = True
-TTS_MODEL = "chatterbox-turbo"
-TTS_IDLE_TIMEOUT = 300        # 5 min before unloading model
-TTS_SAMPLE_RATE = 24000       # Chatterbox output rate
+TTS_BACKEND = "kokoro"         # "kokoro" | "chatterbox" | "macos"
+TTS_VOICE = "af_heart"         # Kokoro voice (ignored by other backends)
+TTS_IDLE_TIMEOUT = 300         # 5 min before unloading model
+TTS_SAMPLE_RATE = 24000        # All backends output at this rate
 
 # Audio settings
 SAMPLE_RATE = 16000
