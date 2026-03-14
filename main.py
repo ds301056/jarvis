@@ -18,7 +18,16 @@ def voice_status():
         "stt_backend": config.STT_BACKEND,
         "whisper_model": config.WHISPER_MODEL,
         "ollama_model": config.OLLAMA_MODEL,
+        "tts_enabled": config.TTS_ENABLED,
+        "tts_model": config.TTS_MODEL,
     }
+
+
+@app.get("/tts/status")
+def tts_status():
+    """Return the current TTS model status."""
+    from tts import model_status
+    return model_status()
 
 
 @app.get("/llm/status")
