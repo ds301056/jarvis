@@ -1,8 +1,10 @@
 import { useRef, useMemo } from 'react'
+import React from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { vertexShader, fragmentShader } from './OrbShaderMaterial'
 import { JarvisState, STATE_CONFIGS } from '../types'
+import { RmsRef } from '../hooks/useJarvisSocket'
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
@@ -14,11 +16,11 @@ function lerpColor(a: [number, number, number], b: [number, number, number], t: 
 
 interface OrbProps {
   state: JarvisState
-  rms: number
+  rmsRef: React.MutableRefObject<RmsRef>
   audioSpikes?: boolean  // when true, show dramatic spikes during speaking/listening
 }
 
-export default function Orb({ state, rms, audioSpikes = false }: OrbProps) {
+export default function Orb({ state, rmsRef, audioSpikes = false }: OrbProps) {
   const meshRef = useRef<THREE.Mesh>(null)
 
   const uniforms = useMemo(
@@ -46,6 +48,7 @@ export default function Orb({ state, rms, audioSpikes = false }: OrbProps) {
   useFrame((_, delta) => {
     if (!meshRef.current) return
 
+    const rms = rmsRef.current.value
     const config = STATE_CONFIGS[state]
     const lerpFactor = 1 - Math.pow(0.001, delta) // ~smooth over 300ms
 
@@ -87,7 +90,6 @@ export default function Orb({ state, rms, audioSpikes = false }: OrbProps) {
         uniforms={uniforms}
         vertexShader={vertexShader}
         fragmentShader={fragmentShader}
-        transparent
       />
     </mesh>
   )

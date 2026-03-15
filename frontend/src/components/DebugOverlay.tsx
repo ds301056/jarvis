@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react'
+import React from 'react'
 import { JarvisState } from '../types'
+import { RmsRef } from '../hooks/useJarvisSocket'
 
 interface DebugOverlayProps {
   state: JarvisState
-  rms: number
-  rmsSource: 'mic' | 'tts'
+  rmsRef: React.MutableRefObject<RmsRef>
   connected: boolean
   messageCount: number
 }
 
-export default function DebugOverlay({ state, rms, rmsSource, connected, messageCount }: DebugOverlayProps) {
+export default function DebugOverlay({ state, rmsRef, connected, messageCount }: DebugOverlayProps) {
   const [visible, setVisible] = useState(false)
+  const [rmsDisplay, setRmsDisplay] = useState<RmsRef>({ value: 0, source: 'mic' })
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -19,6 +21,15 @@ export default function DebugOverlay({ state, rms, rmsSource, connected, message
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
+
+  // Poll rmsRef at 4Hz for display only
+  useEffect(() => {
+    if (!visible) return
+    const id = setInterval(() => {
+      setRmsDisplay({ ...rmsRef.current })
+    }, 250)
+    return () => clearInterval(id)
+  }, [visible, rmsRef])
 
   if (!visible) return null
 
@@ -53,15 +64,15 @@ export default function DebugOverlay({ state, rms, rmsSource, connected, message
       </div>
 
       <div style={styles.row}>
-        <span style={styles.label}>RMS ({rmsSource})</span>
+        <span style={styles.label}>RMS ({rmsDisplay.source})</span>
         <div style={styles.barContainer}>
           <div style={{
             ...styles.bar,
-            width: `${rms * 100}%`,
-            background: rmsSource === 'mic' ? '#44ffaa' : '#4488ff',
+            width: `${rmsDisplay.value * 100}%`,
+            background: rmsDisplay.source === 'mic' ? '#44ffaa' : '#4488ff',
           }} />
         </div>
-        <span style={styles.value}>{rms.toFixed(3)}</span>
+        <span style={styles.value}>{rmsDisplay.value.toFixed(3)}</span>
       </div>
 
       <div style={styles.row}>

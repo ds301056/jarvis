@@ -1,10 +1,9 @@
 import { useEffect, useReducer, useRef, useCallback } from 'react'
+import React from 'react'
 import { JarvisState, ChatMessage } from '../types'
 
 interface JarvisStore {
   state: JarvisState
-  rms: number
-  rmsSource: 'mic' | 'tts'
   messages: ChatMessage[]
   currentTokens: string
   connected: boolean
@@ -12,7 +11,6 @@ interface JarvisStore {
 
 type Action =
   | { type: 'state'; state: JarvisState }
-  | { type: 'rms'; value: number; source: 'mic' | 'tts' }
   | { type: 'transcript'; role: 'user' | 'assistant'; text: string; final: boolean }
   | { type: 'token'; text: string }
   | { type: 'connected' }
@@ -26,8 +24,6 @@ function reducer(s: JarvisStore, a: Action): JarvisStore {
         return { ...s, state: a.state, currentTokens: '' }
       }
       return { ...s, state: a.state }
-    case 'rms':
-      return { ...s, rms: a.value, rmsSource: a.source }
     case 'transcript':
       if (a.final) {
         return {
@@ -42,7 +38,7 @@ function reducer(s: JarvisStore, a: Action): JarvisStore {
     case 'connected':
       return { ...s, connected: true }
     case 'disconnected':
-      return { ...s, connected: false, state: 'idle', rms: 0 }
+      return { ...s, connected: false, state: 'idle' }
     default:
       return s
   }
@@ -50,17 +46,21 @@ function reducer(s: JarvisStore, a: Action): JarvisStore {
 
 const INITIAL: JarvisStore = {
   state: 'idle',
-  rms: 0,
-  rmsSource: 'mic',
   messages: [],
   currentTokens: '',
   connected: false,
+}
+
+export interface RmsRef {
+  value: number
+  source: 'mic' | 'tts'
 }
 
 export function useJarvisSocket() {
   const [store, dispatch] = useReducer(reducer, INITIAL)
   const wsRef = useRef<WebSocket | null>(null)
   const retryRef = useRef(0)
+  const rmsRef = useRef<RmsRef>({ value: 0, source: 'mic' })
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -76,12 +76,18 @@ export function useJarvisSocket() {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data)
+        // RMS updates go straight to ref — no React re-render
+        if (msg.type === 'rms') {
+          rmsRef.current = { value: msg.value, source: msg.source }
+          return
+        }
         dispatch(msg)
       } catch { /* ignore malformed */ }
     }
 
     ws.onclose = () => {
       dispatch({ type: 'disconnected' })
+      rmsRef.current = { value: 0, source: 'mic' }
       // Reconnect with exponential backoff (max 5s)
       const delay = Math.min(1000 * Math.pow(1.5, retryRef.current), 5000)
       retryRef.current++
@@ -100,5 +106,5 @@ export function useJarvisSocket() {
     }
   }, [connect])
 
-  return store
+  return { ...store, rmsRef }
 }

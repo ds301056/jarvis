@@ -253,6 +253,18 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
 
     if full_response:
         events.publish({"type": "transcript", "role": "assistant", "text": " ".join(full_response), "final": True})
+
+    # Barge-in may have occurred after the LLM stream finished but while
+    # TTS/playback were still running.  The producer loop never saw the
+    # interrupt so `interrupted` stayed False, but the monitor may have
+    # captured audio.  Handle it here instead of silently dropping it.
+    if interrupt_event.is_set() and captured_audio_path:
+        print("[interrupted (late) — processing barge-in audio...]")
+        return captured_audio_path[0]
+    if interrupt_event.is_set():
+        print("[interrupted (late) — no audio captured, listening again...]")
+        return ""
+
     return None
 
 

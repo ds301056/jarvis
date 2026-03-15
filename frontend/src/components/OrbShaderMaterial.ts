@@ -130,6 +130,6 @@ export const fragmentShader = /* glsl */ `
     // Add glow at edges
     color += uColor * fresnel * 0.6;
 
-    gl_FragColor = vec4(color, 0.92 + fresnel * 0.08);
+    gl_FragColor = vec4(color, 1.0);
   }
 `
