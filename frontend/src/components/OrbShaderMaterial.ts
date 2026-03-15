@@ -5,6 +5,7 @@ export const vertexShader = /* glsl */ `
   uniform float uAmplitude;
   uniform float uSpeed;
   uniform float uNoiseScale;
+  uniform float uSpikeAmount;  // 0.0 = off (current look), 1.0 = full dramatic spikes
 
   varying vec3 vNormal;
   varying vec3 vPosition;
@@ -85,6 +86,18 @@ export const vertexShader = /* glsl */ `
     float noise1 = snoise(pos * uNoiseScale + t * 0.5);
     float noise2 = snoise(pos * uNoiseScale * 2.0 + t * 0.8) * 0.5;
     float displacement = (noise1 + noise2) * uAmplitude;
+
+    // Audio-reactive spikes: high-frequency noise that shoots outward
+    // Only active when uSpikeAmount > 0 (controlled by setting)
+    if (uSpikeAmount > 0.0) {
+      // Sharp spikes using high-frequency noise, powered by audio amplitude
+      float spike1 = snoise(pos * 4.0 + t * 2.0);
+      float spike2 = snoise(pos * 7.0 + t * 3.5) * 0.6;
+      float spikeMask = max(spike1, 0.0);  // only outward spikes
+      spikeMask = pow(spikeMask, 1.5);     // sharpen the peaks
+      float spikeDisp = (spikeMask + max(spike2, 0.0) * 0.4) * uAmplitude * uSpikeAmount * 2.5;
+      displacement += spikeDisp;
+    }
 
     pos += normal * displacement;
 

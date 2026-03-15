@@ -15,9 +15,10 @@ function lerpColor(a: [number, number, number], b: [number, number, number], t: 
 interface OrbProps {
   state: JarvisState
   rms: number
+  audioSpikes?: boolean  // when true, show dramatic spikes during speaking/listening
 }
 
-export default function Orb({ state, rms }: OrbProps) {
+export default function Orb({ state, rms, audioSpikes = false }: OrbProps) {
   const meshRef = useRef<THREE.Mesh>(null)
 
   const uniforms = useMemo(
@@ -27,6 +28,7 @@ export default function Orb({ state, rms }: OrbProps) {
       uSpeed: { value: 0.3 },
       uNoiseScale: { value: 1.0 },
       uColor: { value: new THREE.Vector3(0.27, 0.53, 1.0) },
+      uSpikeAmount: { value: 0 },
     }),
     []
   )
@@ -38,6 +40,7 @@ export default function Orb({ state, rms }: OrbProps) {
     noiseScale: 1.0,
     color: [0.27, 0.53, 1.0] as [number, number, number],
     rotationY: 0,
+    spikeAmount: 0,
   })
 
   useFrame((_, delta) => {
@@ -59,11 +62,16 @@ export default function Orb({ state, rms }: OrbProps) {
     current.current.noiseScale = lerp(current.current.noiseScale, config.noiseScale, lerpFactor)
     current.current.color = lerpColor(current.current.color, config.color, lerpFactor)
 
+    // Spike amount: ramp up when speaking/listening with audioSpikes on, otherwise 0
+    const targetSpike = audioSpikes && (state === 'speaking' || state === 'listening') ? rms : 0
+    current.current.spikeAmount = lerp(current.current.spikeAmount, targetSpike, lerpFactor)
+
     uniforms.uTime.value += delta
     uniforms.uAmplitude.value = current.current.amplitude
     uniforms.uSpeed.value = current.current.speed
     uniforms.uNoiseScale.value = current.current.noiseScale
     uniforms.uColor.value.set(...current.current.color)
+    uniforms.uSpikeAmount.value = current.current.spikeAmount
 
     // Slow rotation during thinking state
     if (state === 'thinking') {

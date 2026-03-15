@@ -37,6 +37,7 @@ def _mic_monitor(mic_stream, interrupt_event: threading.Event,
             if rms > config.BARGE_IN_THRESHOLD:
                 print(f"\n[barge-in detected, rms={rms:.0f}]", flush=True)
                 interrupt_event.set()
+                events.publish({"type": "state", "state": "listening"})
                 break
         else:
             # stop_event was set without barge-in — normal exit
@@ -305,10 +306,10 @@ def voice_loop():
 
                 if config.TTS_ENABLED:
                     captured_path = _respond_with_tts(text, mic_stream)
-                    events.publish({"type": "state", "state": "idle"})
                     if captured_path is not None:
                         if captured_path:
-                            # Barge-in with captured audio — transcribe directly
+                            # Barge-in with captured audio — already in "listening" state
+                            # from _mic_monitor. Now transition to thinking for transcription.
                             events.publish({"type": "state", "state": "thinking"})
                             barge_text = transcribe(captured_path)
                             if barge_text:
@@ -316,12 +317,12 @@ def voice_loop():
                                 events.publish({"type": "transcript", "role": "user", "text": barge_text, "final": True})
                                 print("Jarvis: ", end="", flush=True)
                                 captured_path = _respond_with_tts(barge_text, mic_stream)
-                                events.publish({"type": "state", "state": "idle"})
                                 if captured_path is not None and captured_path:
                                     pass
+                                else:
+                                    events.publish({"type": "state", "state": "idle"})
                             else:
                                 print("(barge-in audio empty, listening again)")
-                                events.publish({"type": "state", "state": "idle"})
                         continue
                 else:
                     query(text, stream=True)
