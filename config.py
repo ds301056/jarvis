@@ -1,5 +1,14 @@
 """Central configuration for Jarvis."""
 
+# System prompt for LLM chat
+SYSTEM_PROMPT = """You are Jarvis, a helpful voice assistant running on a Mac Mini.
+Keep responses concise and conversational — they will be spoken aloud.
+Use tools when the user asks you to do something actionable.
+For simple questions, just answer directly."""
+
+# Skills settings
+SKILLS_ENABLED = True
+
 # STT settings
 STT_BACKEND = "local"  # "local" | "api" | "apple"
 WHISPER_MODEL = "base"
