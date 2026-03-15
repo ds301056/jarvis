@@ -16,6 +16,12 @@ from llm import query, stream_sentences
 from wake_word import wait_for_wake_word
 
 
+def _is_dismiss(text: str) -> bool:
+    """Check if user wants to dismiss Jarvis and return to wake word."""
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in config.DISMISS_PHRASES)
+
+
 def _mic_monitor(mic_stream, interrupt_event: threading.Event,
                  stop_event: threading.Event, captured_audio_path: list):
     """Monitor mic during TTS playback; set interrupt_event if user speaks loudly.
@@ -334,6 +340,12 @@ def voice_loop():
 
                 print(f"\nYou: {text}")
                 events.publish({"type": "transcript", "role": "user", "text": text, "final": True})
+
+                if _is_dismiss(text):
+                    print("[dismissed — returning to wake word]")
+                    events.publish({"type": "state", "state": "idle"})
+                    continue
+
                 events.publish({"type": "state", "state": "thinking"})
                 print("Jarvis: ", end="", flush=True)
 
@@ -359,6 +371,11 @@ def voice_loop():
 
                         if not full_text:
                             print("(barge-in audio empty, listening again)")
+                            break
+
+                        if _is_dismiss(full_text):
+                            print("[dismissed via barge-in — returning to wake word]")
+                            events.publish({"type": "state", "state": "idle"})
                             break
 
                         print(f"\nYou: {full_text}")

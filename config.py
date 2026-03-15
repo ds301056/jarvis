@@ -31,3 +31,18 @@ BARGE_IN_SILENCE_DURATION = 2.0  # seconds of silence before ending barge-in cap
 WAKE_WORD_ENABLED = True
 WAKE_WORD_MODEL = "hey_jarvis"
 WAKE_WORD_THRESHOLD = 0.5
+
+# Dismiss phrases (user wants Jarvis to stop and go back to sleep)
+DISMISS_PHRASES = [
+    "that's enough",
+    "nevermind",
+    "never mind",
+    "go back to sleep",
+    "go to sleep",
+    "goodbye",
+    "good bye",
+    "stop",
+    "shut up",
+    "dismiss",
+    "cancel",
+]
