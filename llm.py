@@ -73,14 +73,14 @@ def query(prompt: str, stream: bool = True) -> str:
     return "".join(full_response)
 
 
-def _handle_tool_calls_sync(messages: list[dict], assistant_message: dict,
-                            tools: list) -> str:
-    """Execute tool calls and get the LLM's narration of results."""
+_MAX_TOOL_ROUNDS = 5
+
+
+def _execute_tool_calls(messages: list[dict], tool_calls: list):
+    """Execute a list of tool calls, appending results to messages."""
     from skills import execute_tool
 
-    messages.append(assistant_message)
-
-    for tc in assistant_message["tool_calls"]:
+    for tc in tool_calls:
         func = tc["function"]
         name = func["name"]
         args = func.get("arguments", {})
@@ -89,12 +89,34 @@ def _handle_tool_calls_sync(messages: list[dict], assistant_message: dict,
         print(f"[result: {result}]", flush=True)
         messages.append({"role": "tool", "content": result})
 
-    # Re-query so LLM can narrate the result
-    resp = _chat_request(messages, stream=False, tools=tools)
-    resp.raise_for_status()
-    narration = resp.json()["message"].get("content", "")
-    print(narration)
-    return narration
+
+def _handle_tool_calls_sync(messages: list[dict], assistant_message: dict,
+                            tools: list) -> str:
+    """Execute tool calls in a loop until the LLM returns pure text."""
+    messages.append(assistant_message)
+    current_tool_calls = assistant_message["tool_calls"]
+
+    for _round in range(_MAX_TOOL_ROUNDS):
+        _execute_tool_calls(messages, current_tool_calls)
+
+        # Re-query — check if LLM wants more tool calls or narrates
+        resp = _chat_request(messages, stream=False, tools=tools)
+        resp.raise_for_status()
+        message = resp.json()["message"]
+
+        if message.get("tool_calls"):
+            messages.append(message)
+            current_tool_calls = message["tool_calls"]
+            continue
+
+        # Pure text — narration
+        narration = message.get("content", "")
+        print(narration)
+        return narration
+
+    # Max rounds reached — return whatever text we have
+    print("[max tool rounds reached]")
+    return ""
 
 
 def _stream_response(messages: list[dict], tools: list):
@@ -143,9 +165,8 @@ def stream_sentences(prompt: str):
     full_response, tool_calls = _stream_response(messages, tools)
 
     if tool_calls:
-        # Execute tools and get narration via streaming
+        # Multi-step tool execution loop
         import events
-        from skills import execute_tool
 
         events.publish({"type": "state", "state": "acting"})
 
@@ -155,19 +176,33 @@ def stream_sentences(prompt: str):
             "tool_calls": tool_calls,
         }
         messages.append(assistant_message)
+        current_tool_calls = tool_calls
 
-        for tc in tool_calls:
-            func = tc["function"]
-            name = func["name"]
-            args = func.get("arguments", {})
-            print(f"\n[executing: {name}({args})]", flush=True)
-            result = execute_tool(name, args)
-            print(f"[result: {result}]", flush=True)
-            messages.append({"role": "tool", "content": result})
+        for _round in range(_MAX_TOOL_ROUNDS):
+            _execute_tool_calls(messages, current_tool_calls)
 
+            # Check if LLM wants more tool calls before narrating
+            next_response, next_tool_calls = _stream_response(messages, tools)
+
+            if next_tool_calls:
+                messages.append({
+                    "role": "assistant",
+                    "content": "".join(next_response),
+                    "tool_calls": next_tool_calls,
+                })
+                current_tool_calls = next_tool_calls
+                continue
+
+            # Pure text — stream it as TTS sentences
+            events.publish({"type": "state", "state": "speaking"})
+            combined = "".join(next_response)
+            if combined.strip():
+                yield from _split_text_to_sentences(combined)
+            print()
+            return
+
+        # Max rounds — stream whatever the last response was
         events.publish({"type": "state", "state": "speaking"})
-
-        # Stream the narration and yield sentences from it
         yield from _stream_sentences_from_messages(messages, tools)
         return
 
