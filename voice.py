@@ -244,9 +244,16 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
         print("[interrupted — no audio captured, listening for command...]")
         return ""
 
-    # Normal (non-interrupted) path: wait for pipeline to finish
-    tts_thread.join()
-    playback_thread.join()
+    # Normal (non-interrupted) path: wait for pipeline to finish,
+    # but check for late barge-in so we don't block on a long synthesize().
+    while tts_thread.is_alive():
+        tts_thread.join(timeout=0.2)
+        if interrupt_event.is_set():
+            break
+    while playback_thread.is_alive():
+        playback_thread.join(timeout=0.2)
+        if interrupt_event.is_set():
+            break
     stop_monitor.set()
     if monitor_thread is not None:
         monitor_thread.join(timeout=2.0)
