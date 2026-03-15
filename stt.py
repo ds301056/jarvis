@@ -10,11 +10,14 @@ import config
 import events
 
 
-def record_audio(mic_stream=None, pa_instance=None) -> str:
+def record_audio(mic_stream=None, pa_instance=None, initial_speech=False) -> str:
     """Record audio from the microphone until silence is detected. Returns path to temp wav file.
 
     If mic_stream and pa_instance are provided, uses the existing stream
     (caller owns it — we won't close it). Otherwise creates a new one.
+
+    If initial_speech is True, the silence timer starts immediately (user was
+    already speaking, e.g. after barge-in).
     """
     owns_stream = mic_stream is None
     if owns_stream:
@@ -42,7 +45,7 @@ def record_audio(mic_stream=None, pa_instance=None) -> str:
     frames = []
     silent_chunks = 0
     max_silent_chunks = int(config.SILENCE_DURATION * config.SAMPLE_RATE / config.CHUNK_SIZE)
-    has_speech = False
+    has_speech = initial_speech
     _chunk_count = 0
 
     try:

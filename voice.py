@@ -13,6 +13,7 @@ import config
 import events
 from stt import record_audio, transcribe
 from llm import query, stream_sentences
+from wake_word import wait_for_wake_word
 
 
 def _mic_monitor(mic_stream, interrupt_event: threading.Event,
@@ -46,11 +47,13 @@ def _mic_monitor(mic_stream, interrupt_event: threading.Event,
         return
 
     # --- Phase 2: record the user's utterance until silence ---
-    print("[recording barge-in utterance...]", flush=True)
+    max_silent_chunks = int(config.BARGE_IN_SILENCE_DURATION * config.SAMPLE_RATE / CHUNK)
+    print(f"[recording barge-in utterance... threshold={phase2_threshold}, "
+          f"silence_duration={config.BARGE_IN_SILENCE_DURATION}s, "
+          f"max_silent_chunks={max_silent_chunks}]", flush=True)
     frames = [data]  # include the chunk that triggered barge-in
     silent_chunks = 0
-    max_silent_chunks = int(1.0 * config.SAMPLE_RATE / CHUNK)  # 1s silence
-    has_speech = True  # we already have speech from the trigger chunk
+    _p2_chunk_count = 0
 
     try:
         while not stop_event.is_set():
@@ -59,12 +62,19 @@ def _mic_monitor(mic_stream, interrupt_event: threading.Event,
             samples = struct.unpack(f"<{CHUNK}h", data)
             rms = math.sqrt(sum(s * s for s in samples) / CHUNK)
 
+            _p2_chunk_count += 1
             if rms > phase2_threshold:
+                if silent_chunks > 0 and _p2_chunk_count % 4 == 0:
+                    print(f"  [phase2] speech resumed (rms={rms:.0f}), reset silence from {silent_chunks}", flush=True)
                 silent_chunks = 0
             else:
                 silent_chunks += 1
 
+            if _p2_chunk_count % 8 == 0:  # every ~0.5s
+                print(f"  [phase2] rms={rms:.0f} silent={silent_chunks}/{max_silent_chunks}", flush=True)
+
             if silent_chunks >= max_silent_chunks:
+                print(f"  [phase2] silence detected ({config.BARGE_IN_SILENCE_DURATION}s), ending capture", flush=True)
                 break
     except OSError:
         pass
@@ -226,11 +236,11 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
         _drain_queue(sentence_q)
         _drain_queue(audio_q)
 
-        # Wait for monitor to finish Phase 2 capture (needs the mic stream,
-        # so we MUST wait before returning to avoid concurrent mic reads)
-        stop_monitor.set()
+        # Wait for monitor to finish Phase 2 capture (silence detection).
+        # Do NOT set stop_monitor here — let Phase 2 run until it detects
+        # silence, otherwise it captures only 2-3 chunks of garbage.
         if monitor_thread is not None:
-            monitor_thread.join(timeout=5.0)
+            monitor_thread.join(timeout=10.0)
 
         # Give tts/playback a moment to clean up, but don't block long
         tts_thread.join(timeout=0.5)
@@ -285,6 +295,8 @@ def voice_loop():
         print("Loading TTS model in background...")
         from tts import warm_up
         warm_up()
+    if config.WAKE_WORD_ENABLED:
+        print("Wake word enabled — say 'Hey Jarvis' to activate")
     print("-" * 50)
 
     # Create persistent mic stream (one-time HFP switch for AirPods)
@@ -311,6 +323,8 @@ def voice_loop():
     try:
         while True:
             try:
+                if config.WAKE_WORD_ENABLED:
+                    wait_for_wake_word(mic_stream)
                 events.publish({"type": "state", "state": "listening"})
                 text = transcribe(record_audio(mic_stream=mic_stream, pa_instance=pa))
                 if not text:
@@ -325,21 +339,33 @@ def voice_loop():
 
                 if config.TTS_ENABLED:
                     captured_path = _respond_with_tts(text, mic_stream)
-                    # Loop to handle chained barge-ins (user interrupts
-                    # the response, then interrupts the next one, etc.)
+                    # Handle barge-in: let user finish their full thought
+                    # before responding (stay in "listening" state)
                     while captured_path is not None:
                         if not captured_path:
                             # Interrupted but no audio captured — go back to listening
                             break
-                        events.publish({"type": "state", "state": "thinking"})
+                        print(f"[barge-in captured: {captured_path}]")
+
+                        # Stay in "listening" — let user finish speaking
+                        print("[barge-in: continuing to listen for full utterance...]")
+                        continuation_path = record_audio(mic_stream=mic_stream, pa_instance=pa, initial_speech=True)
+
+                        # Transcribe both parts and combine
                         barge_text = transcribe(captured_path)
-                        if not barge_text:
+                        continuation_text = transcribe(continuation_path)
+                        print(f"[barge-in transcription: '{barge_text}' + continuation: '{continuation_text}']")
+                        full_text = f"{barge_text} {continuation_text}".strip() if continuation_text else (barge_text or "")
+
+                        if not full_text:
                             print("(barge-in audio empty, listening again)")
                             break
-                        print(f"\nYou: {barge_text}")
-                        events.publish({"type": "transcript", "role": "user", "text": barge_text, "final": True})
+
+                        print(f"\nYou: {full_text}")
+                        events.publish({"type": "transcript", "role": "user", "text": full_text, "final": True})
+                        events.publish({"type": "state", "state": "thinking"})
                         print("Jarvis: ", end="", flush=True)
-                        captured_path = _respond_with_tts(barge_text, mic_stream)
+                        captured_path = _respond_with_tts(full_text, mic_stream)
                     continue
                 else:
                     query(text, stream=True)

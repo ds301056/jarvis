@@ -25,3 +25,9 @@ SILENCE_DURATION = 2.0  # seconds of silence before stopping recording
 # Barge-in settings (interrupt Jarvis by speaking)
 BARGE_IN_ENABLED = True
 BARGE_IN_THRESHOLD = 1500     # Higher than SILENCE_THRESHOLD to ignore speaker bleed
+BARGE_IN_SILENCE_DURATION = 2.0  # seconds of silence before ending barge-in capture (match SILENCE_DURATION)
+
+# Wake word settings
+WAKE_WORD_ENABLED = True
+WAKE_WORD_MODEL = "hey_jarvis"
+WAKE_WORD_THRESHOLD = 0.5
