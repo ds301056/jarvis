@@ -10,6 +10,7 @@ import wave
 import pyaudio
 
 import config
+import events
 from stt import record_audio, transcribe
 from llm import query, stream_sentences
 
@@ -103,11 +104,19 @@ def _playback_worker(audio_q: queue.Queue, interrupt_event: threading.Event):
             if pcm is None:
                 break
             offset = 0
+            _slice_count = 0
             while offset < len(pcm):
                 if interrupt_event.is_set():
                     return
                 end = min(offset + _PLAYBACK_SLICE, len(pcm))
-                stream.write(pcm[offset:end])
+                chunk = pcm[offset:end]
+                stream.write(chunk)
+                # Emit TTS RMS every 4th slice (~200ms)
+                _slice_count += 1
+                if _slice_count % 4 == 0 and events.has_subscribers():
+                    samples = struct.unpack(f"<{len(chunk)//2}h", chunk)
+                    rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+                    events.publish({"type": "rms", "value": min(rms / 8000, 1.0), "source": "tts"})
                 offset = end
     finally:
         stream.stop_stream()
@@ -185,9 +194,14 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
         monitor_thread.start()
 
     # Producer: stream sentences from LLM into the pipeline
+    events.publish({"type": "state", "state": "speaking"})
     interrupted = False
+    full_response = []
     try:
         for sentence in stream_sentences(text):
+            full_response.append(sentence)
+            if events.has_subscribers():
+                events.publish({"type": "token", "text": sentence})
             if interrupt_event.is_set():
                 interrupted = True
                 break
@@ -221,6 +235,8 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
         tts_thread.join(timeout=0.5)
         playback_thread.join(timeout=0.5)
 
+        if full_response:
+            events.publish({"type": "transcript", "role": "assistant", "text": " ".join(full_response), "final": True})
         if captured_audio_path:
             print("[interrupted — processing barge-in audio...]")
             return captured_audio_path[0]
@@ -234,6 +250,8 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
     if monitor_thread is not None:
         monitor_thread.join(timeout=2.0)
 
+    if full_response:
+        events.publish({"type": "transcript", "role": "assistant", "text": " ".join(full_response), "final": True})
     return None
 
 
@@ -268,41 +286,47 @@ def voice_loop():
         if rms > 1:
             break
     print("\r🎤 Mic active — ready!                ")
+    events.publish({"type": "state", "state": "idle"})
 
     try:
         while True:
             try:
+                events.publish({"type": "state", "state": "listening"})
                 text = transcribe(record_audio(mic_stream=mic_stream, pa_instance=pa))
                 if not text:
                     print("(no speech detected, try again)")
+                    events.publish({"type": "state", "state": "idle"})
                     continue
 
                 print(f"\nYou: {text}")
+                events.publish({"type": "transcript", "role": "user", "text": text, "final": True})
+                events.publish({"type": "state", "state": "thinking"})
                 print("Jarvis: ", end="", flush=True)
 
                 if config.TTS_ENABLED:
                     captured_path = _respond_with_tts(text, mic_stream)
+                    events.publish({"type": "state", "state": "idle"})
                     if captured_path is not None:
                         if captured_path:
                             # Barge-in with captured audio — transcribe directly
+                            events.publish({"type": "state", "state": "thinking"})
                             barge_text = transcribe(captured_path)
                             if barge_text:
                                 print(f"\nYou: {barge_text}")
+                                events.publish({"type": "transcript", "role": "user", "text": barge_text, "final": True})
                                 print("Jarvis: ", end="", flush=True)
                                 captured_path = _respond_with_tts(barge_text, mic_stream)
-                                # If interrupted again during barge-in response,
-                                # loop will handle it on next iteration
+                                events.publish({"type": "state", "state": "idle"})
                                 if captured_path is not None and captured_path:
-                                    # Chain: re-enter loop with this new capture
-                                    # For simplicity, just continue to next iteration
                                     pass
                             else:
                                 print("(barge-in audio empty, listening again)")
-                        # Empty string = interrupted but no capture, just re-listen
+                                events.publish({"type": "state", "state": "idle"})
                         continue
                 else:
                     query(text, stream=True)
 
+                events.publish({"type": "state", "state": "idle"})
                 print()
 
             except KeyboardInterrupt:

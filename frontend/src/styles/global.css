@@ -13,6 +13,10 @@ html, body, #root {
   color: #e0e0e0;
 }
 
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 .state-label {
   position: fixed;
   bottom: 24px;

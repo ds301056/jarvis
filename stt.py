@@ -7,6 +7,7 @@ import struct
 import pyaudio
 
 import config
+import events
 
 
 def record_audio(mic_stream=None, pa_instance=None) -> str:
@@ -59,6 +60,8 @@ def record_audio(mic_stream=None, pa_instance=None) -> str:
                 label = "SPEECH" if rms > config.SILENCE_THRESHOLD else "silent"
                 bar = "#" * min(int(rms / 50), 40)
                 print(f"\r  RMS: {rms:6.0f} [{label}] {bar:<40s}", end="", flush=True)
+                if events.has_subscribers():
+                    events.publish({"type": "rms", "value": min(rms / 8000, 1.0), "source": "mic"})
 
             if rms > config.SILENCE_THRESHOLD:
                 silent_chunks = 0
