@@ -318,24 +318,22 @@ def voice_loop():
 
                 if config.TTS_ENABLED:
                     captured_path = _respond_with_tts(text, mic_stream)
-                    if captured_path is not None:
-                        if captured_path:
-                            # Barge-in with captured audio — already in "listening" state
-                            # from _mic_monitor. Now transition to thinking for transcription.
-                            events.publish({"type": "state", "state": "thinking"})
-                            barge_text = transcribe(captured_path)
-                            if barge_text:
-                                print(f"\nYou: {barge_text}")
-                                events.publish({"type": "transcript", "role": "user", "text": barge_text, "final": True})
-                                print("Jarvis: ", end="", flush=True)
-                                captured_path = _respond_with_tts(barge_text, mic_stream)
-                                if captured_path is not None and captured_path:
-                                    pass
-                                else:
-                                    events.publish({"type": "state", "state": "idle"})
-                            else:
-                                print("(barge-in audio empty, listening again)")
-                        continue
+                    # Loop to handle chained barge-ins (user interrupts
+                    # the response, then interrupts the next one, etc.)
+                    while captured_path is not None:
+                        if not captured_path:
+                            # Interrupted but no audio captured — go back to listening
+                            break
+                        events.publish({"type": "state", "state": "thinking"})
+                        barge_text = transcribe(captured_path)
+                        if not barge_text:
+                            print("(barge-in audio empty, listening again)")
+                            break
+                        print(f"\nYou: {barge_text}")
+                        events.publish({"type": "transcript", "role": "user", "text": barge_text, "final": True})
+                        print("Jarvis: ", end="", flush=True)
+                        captured_path = _respond_with_tts(barge_text, mic_stream)
+                    continue
                 else:
                     query(text, stream=True)
 
