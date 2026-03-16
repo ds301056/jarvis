@@ -1,22 +1,44 @@
-"""Ollama LLM client with streaming support and tool calling."""
+"""LLM client with streaming support, tool calling, and pluggable providers."""
 
-import json
 import re
-
-import requests
 
 import config
 
 # Lazy-load skills to avoid circular imports
 _tools_cache = None
+_tools_provider = None  # track which provider the cache was built for
+
+
+def _get_provider():
+    """Return the provider module for the current LLM_PROVIDER setting."""
+    provider = config.LLM_PROVIDER
+    if provider == "ollama":
+        from llm_providers import ollama_provider as mod
+    elif provider == "anthropic":
+        from llm_providers import anthropic_provider as mod
+    elif provider == "openai":
+        from llm_providers import openai_provider as mod
+    elif provider == "gemini":
+        from llm_providers import gemini_provider as mod
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider}")
+    return mod
 
 
 def _get_tools():
-    """Get Ollama tool definitions (cached)."""
-    global _tools_cache
-    if _tools_cache is None and config.SKILLS_ENABLED:
-        from skills import get_ollama_tools
-        _tools_cache = get_ollama_tools()
+    """Get tool definitions in the current provider's format (cached, invalidated on provider change)."""
+    global _tools_cache, _tools_provider
+    current = config.LLM_PROVIDER
+    if _tools_cache is None or _tools_provider != current:
+        if config.SKILLS_ENABLED:
+            from skills import get_ollama_tools
+            ollama_tools = get_ollama_tools()
+            provider = _get_provider()
+            _tools_cache = provider.convert_tools(ollama_tools)
+            _tools_provider = current
+        else:
+            _tools_cache = []
+            _tools_provider = current
     return _tools_cache or []
 
 
@@ -46,7 +68,7 @@ def _needs_tools(prompt: str) -> bool:
 
 
 def _build_messages(prompt: str) -> list[dict]:
-    """Build the messages list for /api/chat."""
+    """Build the messages list for chat."""
     messages = [
         {"role": "system", "content": config.SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
@@ -54,35 +76,21 @@ def _build_messages(prompt: str) -> list[dict]:
     return messages
 
 
-def _chat_request(messages: list[dict], stream: bool = True, tools: list | None = None):
-    """Make a request to Ollama's /api/chat endpoint."""
-    url = f"{config.OLLAMA_URL}/api/chat"
-    payload = {
-        "model": config.OLLAMA_MODEL,
-        "messages": messages,
-        "stream": stream,
-    }
-    if tools:
-        payload["tools"] = tools
-    return requests.post(url, json=payload, stream=stream, timeout=120)
-
-
 def query(prompt: str, stream: bool = True) -> str:
-    """Send a prompt to Ollama and return the response. Streams to stdout by default."""
+    """Send a prompt and return the response. Streams to stdout by default."""
+    provider = _get_provider()
     messages = _build_messages(prompt)
     tools = _get_tools() if _needs_tools(prompt) else []
 
     if not stream:
-        resp = _chat_request(messages, stream=False, tools=tools)
-        resp.raise_for_status()
-        data = resp.json()
-        message = data["message"]
-
-        # Handle tool calls
-        if message.get("tool_calls"):
-            return _handle_tool_calls_sync(messages, message, tools)
-
-        return message.get("content", "")
+        result = provider.chat(messages, tools=tools or None)
+        if result.get("tool_calls"):
+            return _handle_tool_calls_sync(messages, {
+                "role": "assistant",
+                "content": result["content"],
+                "tool_calls": result["tool_calls"],
+            }, tools)
+        return result.get("content", "")
 
     # Streaming mode
     full_response, tool_calls = _stream_response(messages, tools)
@@ -118,52 +126,47 @@ def _execute_tool_calls(messages: list[dict], tool_calls: list):
 def _handle_tool_calls_sync(messages: list[dict], assistant_message: dict,
                             tools: list) -> str:
     """Execute tool calls in a loop until the LLM returns pure text."""
+    provider = _get_provider()
     messages.append(assistant_message)
     current_tool_calls = assistant_message["tool_calls"]
 
     for _round in range(_MAX_TOOL_ROUNDS):
         _execute_tool_calls(messages, current_tool_calls)
 
-        # Re-query — check if LLM wants more tool calls or narrates
-        resp = _chat_request(messages, stream=False, tools=tools)
-        resp.raise_for_status()
-        message = resp.json()["message"]
+        result = provider.chat(messages, tools=tools or None)
 
-        if message.get("tool_calls"):
-            messages.append(message)
-            current_tool_calls = message["tool_calls"]
+        if result.get("tool_calls"):
+            messages.append({
+                "role": "assistant",
+                "content": result["content"],
+                "tool_calls": result["tool_calls"],
+            })
+            current_tool_calls = result["tool_calls"]
             continue
 
-        # Pure text — narration
-        narration = message.get("content", "")
+        narration = result.get("content", "")
         print(narration)
         return narration
 
-    # Max rounds reached — return whatever text we have
     print("[max tool rounds reached]")
     return ""
 
 
 def _stream_response(messages: list[dict], tools: list):
     """Stream a chat response, returning (text_tokens, tool_calls)."""
+    provider = _get_provider()
     full_response = []
     tool_calls = []
 
-    with _chat_request(messages, stream=True, tools=tools) as resp:
-        resp.raise_for_status()
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            chunk = json.loads(line)
-            msg = chunk.get("message", {})
-            token = msg.get("content", "")
-            if token:
-                print(token, end="", flush=True)
-                full_response.append(token)
-            if msg.get("tool_calls"):
-                tool_calls.extend(msg["tool_calls"])
-            if chunk.get("done"):
-                break
+    for chunk in provider.stream_chat(messages, tools=tools or None):
+        if "content" in chunk:
+            token = chunk["content"]
+            print(token, end="", flush=True)
+            full_response.append(token)
+        if "tool_calls" in chunk:
+            tool_calls.extend(chunk["tool_calls"])
+        if chunk.get("done"):
+            break
 
     return full_response, tool_calls
 
@@ -171,6 +174,29 @@ def _stream_response(messages: list[dict], tools: list):
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _CLAUSE_BREAK = re.compile(r"(?<=[,;:\u2014])\s+")
 _MIN_CLAUSE_LEN = 30  # only split on clause breaks when buffer exceeds this
+
+
+def _split_buffer(buffer: str):
+    """Try to split a sentence or clause from the front of buffer.
+
+    Returns (chunk, remaining_buffer) or (None, buffer) if no split found.
+    """
+    match = _SENTENCE_END.search(buffer)
+    if match:
+        sentence = buffer[: match.start() + 1].strip()
+        remaining = buffer[match.end():]
+        if sentence:
+            return sentence, remaining
+
+    if len(buffer) >= _MIN_CLAUSE_LEN:
+        cmatch = _CLAUSE_BREAK.search(buffer)
+        if cmatch:
+            clause = buffer[: cmatch.start() + 1].strip()
+            remaining = buffer[cmatch.end():]
+            if clause:
+                return clause, remaining
+
+    return None, buffer
 
 
 def _stream_response_detecting_tools(messages: list[dict], tools: list,
@@ -181,80 +207,53 @@ def _stream_response_detecting_tools(messages: list[dict], tools: list,
     without yielding any sentences. Otherwise, yields sentence/clause chunks
     as they form during streaming.
     """
+    provider = _get_provider()
     buffer = ""
-    pending_text = []  # text tokens collected before we know if tools are coming
+    pending_text = []
+    got_tool = False
 
-    with _chat_request(messages, stream=True, tools=tools) as resp:
-        resp.raise_for_status()
-        for line in resp.iter_lines():
-            if not line:
+    for chunk in provider.stream_chat(messages, tools=tools or None):
+        if "tool_calls" in chunk:
+            tool_calls_out.extend(chunk["tool_calls"])
+            got_tool = True
+            continue
+
+        token = chunk.get("content", "")
+        if token:
+            print(token, end="", flush=True)
+            if got_tool:
+                # Already in tool mode — just print, don't yield
                 continue
-            chunk = json.loads(line)
-            msg = chunk.get("message", {})
-            token = msg.get("content", "")
+            pending_text.append(token)
+            buffer += token
 
-            if msg.get("tool_calls"):
-                # Tool call detected — collect all tool calls and bail out
-                tool_calls_out.extend(msg["tool_calls"])
-                # Print any buffered text but don't yield sentences
-                if token:
-                    print(token, end="", flush=True)
-                # Drain remaining chunks for more tool calls
-                for line2 in resp.iter_lines():
-                    if not line2:
-                        continue
-                    chunk2 = json.loads(line2)
-                    msg2 = chunk2.get("message", {})
-                    t2 = msg2.get("content", "")
-                    if t2:
-                        print(t2, end="", flush=True)
-                    if msg2.get("tool_calls"):
-                        tool_calls_out.extend(msg2["tool_calls"])
-                    if chunk2.get("done"):
-                        break
-                # Append assistant message with tool calls to messages
-                full_text = "".join(pending_text) + token
-                messages.append({
-                    "role": "assistant",
-                    "content": full_text,
-                    "tool_calls": tool_calls_out[:],
-                })
-                return
-
-            if token:
-                print(token, end="", flush=True)
-                pending_text.append(token)
-                buffer += token
-
+        if not got_tool:
             # Split buffer into sentences/clauses and yield
             while True:
-                match = _SENTENCE_END.search(buffer)
-                if match:
-                    sentence = buffer[: match.start() + 1].strip()
-                    buffer = buffer[match.end():]
-                    if sentence:
-                        yield sentence
-                    continue
+                piece, buffer = _split_buffer(buffer)
+                if piece is None:
+                    break
+                yield piece
 
-                if len(buffer) >= _MIN_CLAUSE_LEN:
-                    cmatch = _CLAUSE_BREAK.search(buffer)
-                    if cmatch:
-                        clause = buffer[: cmatch.start() + 1].strip()
-                        buffer = buffer[cmatch.end():]
-                        if clause:
-                            yield clause
-                        continue
-                break
+        if chunk.get("done"):
+            break
 
-            if chunk.get("done"):
-                break
+    if got_tool:
+        # Append assistant message with tool calls
+        full_text = "".join(pending_text)
+        messages.append({
+            "role": "assistant",
+            "content": full_text,
+            "tool_calls": tool_calls_out[:],
+        })
+        return
 
     # Yield any remaining text in the buffer
     remaining = buffer.strip()
     if remaining:
         yield remaining
 
-    # Append assistant message to messages for conversation continuity
+    # Append assistant message for conversation continuity
     full_text = "".join(pending_text)
     if full_text:
         messages.append({"role": "assistant", "content": full_text})
@@ -262,7 +261,7 @@ def _stream_response_detecting_tools(messages: list[dict], tools: list,
 
 
 def stream_sentences(prompt: str):
-    """Stream tokens from Ollama, yielding clauses/sentences for TTS.
+    """Stream tokens from the LLM, yielding clauses/sentences for TTS.
 
     Splits on sentence boundaries (.!?) always, and on clause boundaries
     (,;:—) when the buffered text is long enough. This keeps TTS chunks
@@ -274,12 +273,11 @@ def stream_sentences(prompt: str):
     messages = _build_messages(prompt)
     tools = _get_tools() if _needs_tools(prompt) else []
 
-    # Stream response, yielding sentences in real-time
     tool_calls = []
     yield from _stream_response_detecting_tools(messages, tools, tool_calls)
 
     if not tool_calls:
-        return  # text path done — sentences already yielded in real-time
+        return
 
     # Tool path: execute tools, then stream narration
     import events
@@ -293,49 +291,29 @@ def stream_sentences(prompt: str):
             events.publish({"type": "state", "state": "speaking"})
             return
 
-    # Max rounds — stream whatever we can
     events.publish({"type": "state", "state": "speaking"})
     yield from _stream_sentences_from_messages(messages, tools)
 
 
 def _stream_sentences_from_messages(messages: list[dict], tools: list):
     """Stream a chat response and yield sentence chunks for TTS."""
+    provider = _get_provider()
     buffer = ""
 
-    with _chat_request(messages, stream=True, tools=tools) as resp:
-        resp.raise_for_status()
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            chunk = json.loads(line)
-            msg = chunk.get("message", {})
-            token = msg.get("content", "")
-            if token:
-                print(token, end="", flush=True)
-                buffer += token
+    for chunk in provider.stream_chat(messages, tools=tools or None):
+        token = chunk.get("content", "")
+        if token:
+            print(token, end="", flush=True)
+            buffer += token
 
-            # Split buffer into sentences/clauses
-            while True:
-                match = _SENTENCE_END.search(buffer)
-                if match:
-                    sentence = buffer[: match.start() + 1].strip()
-                    buffer = buffer[match.end():]
-                    if sentence:
-                        yield sentence
-                    continue
-
-                if len(buffer) >= _MIN_CLAUSE_LEN:
-                    cmatch = _CLAUSE_BREAK.search(buffer)
-                    if cmatch:
-                        clause = buffer[: cmatch.start() + 1].strip()
-                        buffer = buffer[cmatch.end():]
-                        if clause:
-                            yield clause
-                        continue
+        while True:
+            piece, buffer = _split_buffer(buffer)
+            if piece is None:
                 break
+            yield piece
 
-            if chunk.get("done"):
-                break
+        if chunk.get("done"):
+            break
 
     remaining = buffer.strip()
     if remaining:

@@ -239,12 +239,13 @@ Store your personal info for auto-filling forms and applications.
 
 ```
 ~/jarvis/
-├── main.py              — FastAPI server (REST + WebSocket + voice loop)
+├── main.py              — FastAPI server (REST + WebSocket + voice loop + chat + settings)
 ├── voice.py             — voice loop: wake word → record → STT → LLM → TTS
-├── llm.py               — Ollama /api/chat client (streaming, tool calling)
+├── llm.py               — LLM client with pluggable providers (streaming, tool calling)
+├── settings.py          — Settings persistence (~/.jarvis/settings.json) + config hot-patching
 ├── stt.py               — speech-to-text (faster-whisper)
 ├── tts.py               — TTS dispatcher (lazy-loads backend on first use)
-├── config.py            — all settings (models, audio, skills, prompts)
+├── config.py            — all settings (models, audio, skills, prompts, API keys)
 ├── events.py            — thread-safe pub/sub for state → WebSocket
 ├── wake_word.py         — openwakeword "Hey Jarvis" detection
 ├── skills/              — tool calling skills (auto-discovered)
@@ -264,6 +265,11 @@ Store your personal info for auto-filling forms and applications.
 │   ├── contacts.py          — contact lookup + calling
 │   ├── system_settings.py   — navigate System Settings
 │   └── app_store.py         — App Store search + install
+├── llm_providers/       — pluggable LLM backends
+│   ├── ollama_provider.py   — Ollama (local, default)
+│   ├── anthropic_provider.py — Anthropic Claude
+│   ├── openai_provider.py   — OpenAI GPT
+│   └── gemini_provider.py   — Google Gemini
 ├── tts_backends/        — pluggable TTS engines
 │   ├── kokoro_backend.py    — Kokoro 82M (fast, default)
 │   ├── chatterbox_backend.py — Chatterbox (high quality, slow)
@@ -283,10 +289,17 @@ Store your personal info for auto-filling forms and applications.
 |---------|---------|-------|
 | `SYSTEM_PROMPT` | (see config.py) | Personality + tool usage guidance |
 | `SKILLS_ENABLED` | `True` | Toggle all tool calling |
+| `LLM_PROVIDER` | `"ollama"` | `"ollama"`, `"anthropic"`, `"openai"`, `"gemini"` |
 | `STT_BACKEND` | `"local"` | Only `"local"` implemented |
 | `WHISPER_MODEL` | `"base"` | Whisper model size |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API |
-| `OLLAMA_MODEL` | `llama3.1:8b` | LLM model |
+| `OLLAMA_MODEL` | `llama3.1:8b` | LLM model (when provider=ollama) |
+| `ANTHROPIC_API_KEY` | env var | From `ANTHROPIC_API_KEY` env var |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Claude model |
+| `OPENAI_API_KEY` | env var | From `OPENAI_API_KEY` env var |
+| `OPENAI_MODEL` | `gpt-4o` | OpenAI model |
+| `GEMINI_API_KEY` | env var | From `GEMINI_API_KEY` env var |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model |
 | `TTS_ENABLED` | `True` | `False` for text-only |
 | `TTS_BACKEND` | `"kokoro"` | `"kokoro"`, `"chatterbox"`, `"macos"` |
 | `TTS_VOICE` | `"af_heart"` | Kokoro voice name |
@@ -295,6 +308,31 @@ Store your personal info for auto-filling forms and applications.
 | `BARGE_IN_ENABLED` | `True` | Interrupt by speaking |
 | `SILENCE_THRESHOLD` | `500` | RMS below this = silence |
 | `SILENCE_DURATION` | `2.0` | Seconds of silence to stop recording |
+
+Settings can also be changed at runtime via the **Settings Overlay** (Cmd+Comma or gear icon). Saved to `~/.jarvis/settings.json`.
+
+---
+
+## LLM Providers
+
+Jarvis supports multiple LLM backends. Switch via settings overlay (Cmd+Comma) or config.
+
+| Provider | Model | Local? | Tool Calling | Best for |
+|----------|-------|--------|-------------|----------|
+| `ollama` (default) | llama3.1:8b | Yes | Yes | Privacy, zero-cost, fast |
+| `anthropic` | Claude Sonnet | No | Yes | Complex reasoning, long context |
+| `openai` | GPT-4o | No | Yes | Broad knowledge, tool calling |
+| `gemini` | Gemini 2.0 Flash | No | Yes | Speed, multimodal |
+
+```bash
+# Switch via environment variable
+LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-... python run.py
+
+# Or set in ~/.jarvis/settings.json (persists across restarts)
+# Or use the Settings overlay (Cmd+Comma) in the UI
+```
+
+All providers use the same internal message format (Ollama-style). Each provider translates on the fly. Tool calling works across all providers.
 
 ---
 
@@ -321,9 +359,14 @@ TTS_BACKEND = "macos"        # instant, no deps
 |----------|--------|------|
 | `/` | GET | Frontend (orb UI) |
 | `/api/status` | GET | Server status |
+| `/api/chat` | POST | Text input (sends `{text}`, streams response via WebSocket) |
+| `/api/settings` | GET | Current settings (API keys masked) |
+| `/api/settings` | POST | Save settings + hot-patch config |
+| `/api/llm/models` | GET | Available models for a provider (`?provider=ollama`) |
 | `/api/voice/status` | GET | Voice pipeline config |
 | `/api/tts/status` | GET | TTS model status |
 | `/api/llm/status` | GET | Ollama connectivity |
+| `/api/search` | GET | Hybrid file search (`?q=query&limit=10`) |
 | `/ws` | WebSocket | Real-time state + RMS streaming |
 
 ```bash
@@ -331,6 +374,11 @@ TTS_BACKEND = "macos"        # instant, no deps
 curl http://localhost:8000/api/status
 curl http://localhost:8000/api/voice/status
 curl http://localhost:8000/api/llm/status
+
+# Text chat (response streams via WebSocket)
+curl -X POST http://localhost:8000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "hello"}'
 ```
 
 ---

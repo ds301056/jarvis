@@ -1,5 +1,7 @@
 """Central configuration for Jarvis."""
 
+import os
+
 # System prompt for LLM chat
 SYSTEM_PROMPT = """You are Jarvis, a helpful voice assistant running on a Mac Mini.
 Keep responses concise and conversational — they will be spoken aloud.
@@ -17,8 +19,15 @@ STT_BACKEND = "local"  # "local" | "api" | "apple"
 WHISPER_MODEL = "base"
 
 # LLM settings
+LLM_PROVIDER = "ollama"  # "ollama" | "anthropic" | "openai" | "gemini"
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "llama3.1:8b"
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = "gpt-4o"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = "gemini-2.0-flash"
 
 # TTS settings
 TTS_ENABLED = True
