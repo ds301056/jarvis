@@ -3,12 +3,13 @@ import { useState, useEffect, ReactNode } from 'react'
 interface LayoutProps {
   orb: ReactNode
   chat: ReactNode
+  chatInput: ReactNode
   searchBar: ReactNode
   searchResults: ReactNode
   searchActive: boolean
 }
 
-export default function Layout({ orb, chat, searchBar, searchResults, searchActive }: LayoutProps) {
+export default function Layout({ orb, chat, chatInput, searchBar, searchResults, searchActive }: LayoutProps) {
   const [compact, setCompact] = useState(false)
 
   useEffect(() => {
@@ -21,7 +22,7 @@ export default function Layout({ orb, chat, searchBar, searchResults, searchActi
   }, [])
 
   if (!compact) {
-    // Fullscreen: orb with search overlay at bottom
+    // Fullscreen: orb with search overlay at bottom, chat input fixed at bottom
     return (
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         {orb}
@@ -33,20 +34,22 @@ export default function Layout({ orb, chat, searchBar, searchResults, searchActi
             </div>
           )}
         </div>
+        {chatInput}
       </div>
     )
   }
 
-  // Compact: orb top, search bar + (results or chat) bottom
+  // Compact: orb top, search bar + (results or chat) bottom, chat input at bottom
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: '0 0 55%', minHeight: 0 }}>{orb}</div>
-      <div style={{ flex: '0 0 45%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: '0 0 45%', minHeight: 0, display: 'flex', flexDirection: 'column', paddingBottom: 72 }}>
         {searchBar}
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {searchActive ? searchResults : chat}
         </div>
       </div>
+      {chatInput}
     </div>
   )
 }
@@ -54,7 +57,7 @@ export default function Layout({ orb, chat, searchBar, searchResults, searchActi
 const styles: Record<string, React.CSSProperties> = {
   searchOverlay: {
     position: 'absolute',
-    bottom: 0,
+    bottom: 80,
     left: 0,
     right: 0,
     background: 'rgba(10, 10, 21, 0.92)',
