@@ -58,3 +58,30 @@ DISMISS_PHRASES = [
     "dismiss",
     "cancel",
 ]
+
+# ── File Search / Indexer settings ───────────────────────────────────
+SEARCH_ENABLED = True
+SEARCH_DIRS = ["~/Documents", "~/Desktop", "~/Downloads"]
+SEARCH_EXCLUDE_DIRS = [
+    ".git", "node_modules", "__pycache__", "venv", ".venv",
+    "Library", ".Trash", "dist", "build",
+]
+SEARCH_EXCLUDE_EXTENSIONS = [
+    ".DS_Store", ".app", ".dmg", ".pkg", ".zip", ".tar", ".gz",
+    ".mp4", ".mov", ".mp3", ".wav", ".jpg", ".png", ".gif",
+    ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot",
+]
+SEARCH_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+SEARCH_EMBEDDING_MODEL = "nomic-embed-text"
+SEARCH_EMBEDDING_DIM = 768
+SEARCH_CHUNK_SIZE = 2000
+SEARCH_CHUNK_OVERLAP = 200
+SEARCH_RESCAN_INTERVAL = 300  # 5 minutes
+SEARCH_DB_PATH = "~/.jarvis/index.db"
+SEARCH_BATCH_SIZE = 32
+
+# ── Web Voice / SSL settings ─────────────────────────────────────────
+WEB_VOICE_ENABLED = True
+SSL_ENABLED = False
+SSL_CERTFILE = "certs/cert.pem"
+SSL_KEYFILE = "certs/key.pem"

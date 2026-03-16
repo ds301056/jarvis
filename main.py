@@ -1,9 +1,10 @@
 import asyncio
 import json
+import subprocess
 import threading
 
 import requests
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -19,6 +20,23 @@ async def startup():
 
     from voice import voice_loop
     threading.Thread(target=voice_loop, daemon=True).start()
+
+    # Start file indexer daemon
+    if config.SEARCH_ENABLED:
+        from indexer import start_indexer
+        threading.Thread(target=start_indexer, daemon=True).start()
+
+
+@app.websocket("/ws/voice")
+async def websocket_voice(ws: WebSocket):
+    """WebSocket endpoint for phone-based voice I/O."""
+    if not config.WEB_VOICE_ENABLED:
+        await ws.close(code=1008, reason="Web voice disabled")
+        return
+    from web_voice import WebVoiceHandler
+    await ws.accept()
+    handler = WebVoiceHandler(ws)
+    await handler.run()
 
 
 @app.websocket("/ws")
@@ -74,6 +92,54 @@ def llm_status():
         }
     except requests.ConnectionError:
         return {"ollama": "unreachable", "configured_model": config.OLLAMA_MODEL}
+
+
+# ── Search API endpoints ─────────────────────────────────────────────
+
+@app.get("/api/search")
+def api_search(q: str = Query(""), limit: int = Query(10, ge=1, le=50)):
+    """Hybrid keyword + semantic file search."""
+    if not q.strip():
+        return {"results": [], "query": q}
+    from indexer.search import search
+    results = search(q, limit=limit)
+    return {"results": results, "query": q}
+
+
+@app.get("/api/search/status")
+def search_status():
+    """Return indexer status."""
+    from indexer import is_indexing, last_scan_time
+    from indexer.db import file_count
+    return {
+        "enabled": config.SEARCH_ENABLED,
+        "indexed_files": file_count() if config.SEARCH_ENABLED else 0,
+        "last_scan": last_scan_time(),
+        "indexing": is_indexing(),
+    }
+
+
+@app.post("/api/search/reindex")
+def search_reindex():
+    """Trigger an immediate re-index."""
+    if not config.SEARCH_ENABLED:
+        return {"status": "disabled"}
+    from indexer import trigger_reindex
+    threading.Thread(target=trigger_reindex, daemon=True).start()
+    return {"status": "started"}
+
+
+@app.get("/api/files/open")
+def open_file(path: str = Query("")):
+    """Open a file in the default macOS application."""
+    if not path:
+        return {"error": "No path provided"}
+    import os
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        return {"error": "File not found"}
+    subprocess.run(["open", path])
+    return {"status": "opened", "path": path}
 
 
 # Serve frontend static files (production build) — must be last

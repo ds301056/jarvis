@@ -24,7 +24,7 @@ html, body, #root {
 
 .state-label {
   position: fixed;
-  bottom: 24px;
+  bottom: 108px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 13px;
@@ -82,4 +82,13 @@ html, body, #root {
   background: rgba(68, 136, 255, 0.15);
   border-color: rgba(68, 136, 255, 0.25);
   color: #88bbff;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(255, 60, 60, 0.5); }
+  50% { box-shadow: 0 0 35px rgba(255, 60, 60, 0.8); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

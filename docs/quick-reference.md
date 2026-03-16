@@ -4,6 +4,33 @@
 
 ---
 
+## Remote Access (Web Terminal)
+
+Access a full terminal from any browser (no SSH app needed):
+
+```bash
+# Start ttyd (from Mac terminal or SSH)
+~/cc-remote.sh
+```
+
+Open in Safari on your phone:
+```
+https://100.81.175.94:7681
+```
+
+Accept the self-signed certificate warning (Advanced → Continue).
+
+**iPhone tip:** Safari's on-screen keyboard doesn't show a Return key in ttyd. Tap the **≡** (hamburger) menu in the top-left of the ttyd page for a toolbar with Return, Ctrl, Alt, Tab, and arrow keys.
+
+**Stop:** Press `Ctrl+C` in the terminal where `cc-remote.sh` is running, or kill the tmux session:
+```bash
+tmux kill-session -t cc-remote
+```
+
+**Restart:** Just run `~/cc-remote.sh` again.
+
+---
+
 ## Starting Jarvis
 
 ```bash
