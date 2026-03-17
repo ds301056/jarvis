@@ -27,6 +27,9 @@ Thumbs.db
 *.bin
 *.pt
 
+# SSL certificates
+certs/
+
 # Frontend
 frontend/node_modules/
 frontend/dist/
