@@ -45,10 +45,13 @@ def search(query: str, limit: int = 10) -> list[dict]:
     # 2. Semantic vector search
     semantic_results = _semantic_search(query)
 
-    # 3. Reciprocal Rank Fusion
-    merged = _rrf_merge(fts_results, semantic_results, k=60)
+    # 3. Path search
+    path_results = _path_search(query)
 
-    # 4. Fetch file metadata and build results
+    # 4. Reciprocal Rank Fusion
+    merged = _rrf_merge(fts_results, semantic_results, path_results, k=60)
+
+    # 5. Fetch file metadata and build results
     results = []
     seen_files = set()
     for chunk_id, score in merged:
@@ -119,16 +122,40 @@ def _semantic_search(query: str) -> list[tuple[int, int]]:
     return [(ids[i], rank) for rank, i in enumerate(top_indices)]
 
 
-def _rrf_merge(list_a: list[tuple[int, int]], list_b: list[tuple[int, int]],
+def _path_search(query: str) -> list[tuple[int, int]]:
+    """Search file paths. Returns [(chunk_id, rank), ...] for best chunk per matching file."""
+    tokens = re.findall(r'\w+', query)
+    if not tokens:
+        return []
+
+    # Try full query first
+    matches = db.path_search(query)
+    if not matches:
+        # Try individual tokens
+        for token in tokens:
+            matches.extend(db.path_search(token))
+
+    # Get first chunk_id for each matching file
+    results = []
+    seen = set()
+    for i, m in enumerate(matches):
+        if m["file_id"] in seen:
+            continue
+        seen.add(m["file_id"])
+        chunk = db.get_first_chunk_for_file(m["file_id"])
+        if chunk:
+            results.append((chunk["id"], i))
+    return results
+
+
+def _rrf_merge(*rank_lists: list[tuple[int, int]],
                k: int = 60) -> list[tuple[int, float]]:
     """Reciprocal Rank Fusion: score = sum(1 / (k + rank))."""
     scores: dict[int, float] = {}
 
-    for chunk_id, rank in list_a:
-        scores[chunk_id] = scores.get(chunk_id, 0) + 1.0 / (k + rank)
-
-    for chunk_id, rank in list_b:
-        scores[chunk_id] = scores.get(chunk_id, 0) + 1.0 / (k + rank)
+    for rank_list in rank_lists:
+        for chunk_id, rank in rank_list:
+            scores[chunk_id] = scores.get(chunk_id, 0) + 1.0 / (k + rank)
 
     return sorted(scores.items(), key=lambda x: x[1], reverse=True)
 

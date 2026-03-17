@@ -188,6 +188,28 @@ def get_chunk_with_file(chunk_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def path_search(query: str, limit: int = 20) -> list[dict]:
+    """Search files by path/name using LIKE. Returns [{file_id, path, name, ...}]."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT id as file_id, path, name, extension, modified_at
+        FROM files
+        WHERE path LIKE ? COLLATE NOCASE
+        ORDER BY modified_at DESC
+        LIMIT ?
+    """, (f"%{query}%", limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_first_chunk_for_file(file_id: int) -> dict | None:
+    """Get the first chunk for a given file."""
+    row = get_conn().execute(
+        "SELECT id, text FROM chunks WHERE file_id = ? ORDER BY chunk_index LIMIT 1",
+        (file_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def embedding_to_blob(vec: list[float]) -> bytes:
     """Convert float list to bytes for storage."""
     return struct.pack(f'{len(vec)}f', *vec)
