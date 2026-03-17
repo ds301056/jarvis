@@ -53,6 +53,9 @@ WAKE_WORD_ENABLED = True
 WAKE_WORD_MODEL = "hey_jarvis"
 WAKE_WORD_THRESHOLD = 0.5
 
+# Conversation mode — stay in dialog after wake word until dismissed or timeout
+CONVERSATION_TIMEOUT = 30.0  # seconds of no speech before returning to wake word
+
 # Dismiss phrases (user wants Jarvis to stop and go back to sleep)
 DISMISS_PHRASES = [
     "that's enough",

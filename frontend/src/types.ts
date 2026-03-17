@@ -1,4 +1,4 @@
-export type JarvisState = 'idle' | 'listening' | 'thinking' | 'speaking'
+export type JarvisState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'conversing'
 
 export interface StateConfig {
   speed: number
@@ -31,6 +31,12 @@ export const STATE_CONFIGS: Record<JarvisState, StateConfig> = {
     amplitude: 0.15,              // base — RMS overrides this
     color: [0.27, 0.53, 1.0],    // #4488ff
     noiseScale: 1.0,
+  },
+  conversing: {
+    speed: 0.4,
+    amplitude: 0.06,
+    color: [0.27, 0.8, 0.85],    // teal — "I'm here, waiting"
+    noiseScale: 1.1,
   },
 }
 

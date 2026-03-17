@@ -327,74 +327,100 @@ def voice_loop():
     events.publish({"type": "state", "state": "idle"})
 
     try:
-        while True:
+        while True:  # outer: wake word loop
             try:
                 if config.WAKE_WORD_ENABLED:
                     wait_for_wake_word(mic_stream)
-                events.publish({"type": "state", "state": "listening"})
-                text = transcribe(record_audio(mic_stream=mic_stream, pa_instance=pa))
-                if not text:
-                    print("(no speech detected, try again)")
-                    events.publish({"type": "state", "state": "idle"})
-                    continue
 
-                print(f"\nYou: {text}")
-                events.publish({"type": "transcript", "role": "user", "text": text, "final": True})
+                # ── Conversation loop ──────────────────────────
+                in_conversation = True
+                first_turn = True
 
-                if _is_dismiss(text):
-                    print("[dismissed — returning to wake word]")
-                    events.publish({"type": "state", "state": "idle"})
-                    continue
+                while in_conversation:
+                    # Between turns (not first): show "conversing" state
+                    if not first_turn:
+                        events.publish({"type": "state", "state": "conversing"})
 
-                events.publish({"type": "state", "state": "thinking"})
-                print("Jarvis: ", end="", flush=True)
+                    events.publish({"type": "state", "state": "listening"})
 
-                if config.TTS_ENABLED:
-                    captured_path = _respond_with_tts(text, mic_stream)
-                    # Handle barge-in: let user finish their full thought
-                    # before responding (stay in "listening" state)
-                    while captured_path is not None:
-                        if not captured_path:
-                            # Interrupted but no audio captured — go back to listening
+                    # First turn: wait indefinitely for speech
+                    # Subsequent turns: timeout after CONVERSATION_TIMEOUT
+                    timeout = None if first_turn else config.CONVERSATION_TIMEOUT
+                    audio_path = record_audio(
+                        mic_stream=mic_stream, pa_instance=pa, max_wait=timeout
+                    )
+
+                    if audio_path is None:
+                        # Timeout — no speech, end conversation
+                        print("[conversation timeout — returning to wake word]")
+                        break
+
+                    text = transcribe(audio_path)
+                    first_turn = False
+
+                    if not text:
+                        print("(no speech detected)")
+                        break
+
+                    print(f"\nYou: {text}")
+                    events.publish({"type": "transcript", "role": "user", "text": text, "final": True})
+
+                    if _is_dismiss(text):
+                        print("[dismissed — returning to wake word]")
+                        break
+
+                    events.publish({"type": "state", "state": "thinking"})
+                    print("Jarvis: ", end="", flush=True)
+
+                    if config.TTS_ENABLED:
+                        captured_path = _respond_with_tts(text, mic_stream)
+                        # Handle barge-in: let user finish their full thought
+                        # before responding (stay in "listening" state)
+                        while captured_path is not None:
+                            if not captured_path:
+                                # Interrupted but no audio captured — go back to listening
+                                break
+                            print(f"[barge-in captured: {captured_path}]")
+
+                            # Stay in "listening" — let user finish speaking
+                            print("[barge-in: continuing to listen for full utterance...]")
+                            continuation_path = record_audio(mic_stream=mic_stream, pa_instance=pa, initial_speech=True)
+
+                            # Transcribe both parts and combine
+                            barge_text = transcribe(captured_path)
+                            continuation_text = transcribe(continuation_path)
+                            print(f"[barge-in transcription: '{barge_text}' + continuation: '{continuation_text}']")
+                            full_text = f"{barge_text} {continuation_text}".strip() if continuation_text else (barge_text or "")
+
+                            if not full_text:
+                                print("(barge-in audio empty, listening again)")
+                                break
+
+                            if _is_dismiss(full_text):
+                                print("[dismissed via barge-in — returning to wake word]")
+                                in_conversation = False
+                                break
+
+                            print(f"\nYou: {full_text}")
+                            events.publish({"type": "transcript", "role": "user", "text": full_text, "final": True})
+                            events.publish({"type": "state", "state": "thinking"})
+                            print("Jarvis: ", end="", flush=True)
+                            captured_path = _respond_with_tts(full_text, mic_stream)
+
+                        if not in_conversation:
                             break
-                        print(f"[barge-in captured: {captured_path}]")
-
-                        # Stay in "listening" — let user finish speaking
-                        print("[barge-in: continuing to listen for full utterance...]")
-                        continuation_path = record_audio(mic_stream=mic_stream, pa_instance=pa, initial_speech=True)
-
-                        # Transcribe both parts and combine
-                        barge_text = transcribe(captured_path)
-                        continuation_text = transcribe(continuation_path)
-                        print(f"[barge-in transcription: '{barge_text}' + continuation: '{continuation_text}']")
-                        full_text = f"{barge_text} {continuation_text}".strip() if continuation_text else (barge_text or "")
-
-                        if not full_text:
-                            print("(barge-in audio empty, listening again)")
-                            break
-
-                        if _is_dismiss(full_text):
-                            print("[dismissed via barge-in — returning to wake word]")
-                            events.publish({"type": "state", "state": "idle"})
-                            break
-
-                        print(f"\nYou: {full_text}")
-                        events.publish({"type": "transcript", "role": "user", "text": full_text, "final": True})
-                        events.publish({"type": "state", "state": "thinking"})
-                        print("Jarvis: ", end="", flush=True)
-                        captured_path = _respond_with_tts(full_text, mic_stream)
-                    continue
-                else:
-                    query(text, stream=True)
+                        # Loop back to listening (conversation continues)
+                    else:
+                        query(text, stream=True)
+                        print()
 
                 events.publish({"type": "state", "state": "idle"})
-                print()
 
             except KeyboardInterrupt:
                 raise
             except Exception as e:
                 print(f"\n[error] {e}")
-                continue
+                events.publish({"type": "state", "state": "idle"})
     except KeyboardInterrupt:
         print("\nExiting voice mode.")
     finally:

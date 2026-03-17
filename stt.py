@@ -10,7 +10,8 @@ import config
 import events
 
 
-def record_audio(mic_stream=None, pa_instance=None, initial_speech=False) -> str:
+def record_audio(mic_stream=None, pa_instance=None, initial_speech=False,
+                 max_wait: float | None = None) -> str | None:
     """Record audio from the microphone until silence is detected. Returns path to temp wav file.
 
     If mic_stream and pa_instance are provided, uses the existing stream
@@ -18,6 +19,8 @@ def record_audio(mic_stream=None, pa_instance=None, initial_speech=False) -> str
 
     If initial_speech is True, the silence timer starts immediately (user was
     already speaking, e.g. after barge-in).
+
+    If max_wait is set, returns None if no speech is detected within that many seconds.
     """
     owns_stream = mic_stream is None
     if owns_stream:
@@ -65,6 +68,13 @@ def record_audio(mic_stream=None, pa_instance=None, initial_speech=False) -> str
                 print(f"\r  RMS: {rms:6.0f} [{label}] {bar:<40s}", end="", flush=True)
                 if events.has_subscribers():
                     events.publish({"type": "rms", "value": min(rms / 8000, 1.0), "source": "mic"})
+
+            # Conversation timeout: no speech started within max_wait
+            if not has_speech and max_wait is not None:
+                wait_elapsed = _chunk_count * config.CHUNK_SIZE / config.SAMPLE_RATE
+                if wait_elapsed >= max_wait:
+                    print("\n[no speech — conversation timeout]")
+                    return None
 
             if rms > config.SILENCE_THRESHOLD:
                 silent_chunks = 0
