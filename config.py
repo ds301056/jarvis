@@ -91,6 +91,6 @@ SEARCH_BATCH_SIZE = 32
 
 # ── Web Voice / SSL settings ─────────────────────────────────────────
 WEB_VOICE_ENABLED = True
-SSL_ENABLED = False
+SSL_ENABLED = True
 SSL_CERTFILE = "certs/cert.pem"
 SSL_KEYFILE = "certs/key.pem"

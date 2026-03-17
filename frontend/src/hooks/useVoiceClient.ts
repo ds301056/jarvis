@@ -160,6 +160,17 @@ export function useVoiceClient(): VoiceClientState {
       setIsRecording(true)
     } catch (err) {
       console.error('Failed to start recording:', err)
+      if (err instanceof DOMException) {
+        if (err.name === 'NotAllowedError') {
+          alert('Microphone access was denied. Please allow microphone permissions in your browser settings.')
+        } else if (err.name === 'NotFoundError') {
+          alert('No microphone found. Please connect a microphone and try again.')
+        } else if (err.name === 'NotSupportedError' || err.name === 'SecurityError') {
+          alert('Microphone access requires HTTPS. Please access Jarvis via https://.')
+        } else {
+          alert(`Microphone error: ${err.message}`)
+        }
+      }
     }
   }, [getAudioContext])
 
