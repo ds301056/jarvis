@@ -67,19 +67,19 @@ def _needs_tools(prompt: str) -> bool:
     return bool(_ACTION_KEYWORDS.search(prompt))
 
 
-def _build_messages(prompt: str) -> list[dict]:
+def _build_messages(prompt: str, history: list[dict] | None = None) -> list[dict]:
     """Build the messages list for chat."""
-    messages = [
-        {"role": "system", "content": config.SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
+    messages = [{"role": "system", "content": config.SYSTEM_PROMPT}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": prompt})
     return messages
 
 
-def query(prompt: str, stream: bool = True) -> str:
+def query(prompt: str, stream: bool = True, history: list[dict] | None = None) -> str:
     """Send a prompt and return the response. Streams to stdout by default."""
     provider = _get_provider()
-    messages = _build_messages(prompt)
+    messages = _build_messages(prompt, history)
     tools = _get_tools() if _needs_tools(prompt) else []
 
     if not stream:
@@ -260,7 +260,7 @@ def _stream_response_detecting_tools(messages: list[dict], tools: list,
     print()
 
 
-def stream_sentences(prompt: str):
+def stream_sentences(prompt: str, history: list[dict] | None = None):
     """Stream tokens from the LLM, yielding clauses/sentences for TTS.
 
     Splits on sentence boundaries (.!?) always, and on clause boundaries
@@ -270,7 +270,7 @@ def stream_sentences(prompt: str):
     Handles tool calls internally: executes tools, re-queries the LLM,
     and streams the narration — so callers don't need to know about tools.
     """
-    messages = _build_messages(prompt)
+    messages = _build_messages(prompt, history)
     tools = _get_tools() if _needs_tools(prompt) else []
 
     tool_calls = []

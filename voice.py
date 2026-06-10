@@ -183,10 +183,17 @@ def _drain_queue(q: queue.Queue):
             break
 
 
-def _respond_with_tts(text: str, mic_stream) -> str | None:
+def _trim_history(history: list[dict]):
+    """Keep history within MAX_CONVERSATION_HISTORY limit."""
+    while len(history) > config.MAX_CONVERSATION_HISTORY:
+        history.pop(0)
+
+
+def _respond_with_tts(text: str, mic_stream, history: list[dict] | None = None) -> tuple[str | None, str]:
     """Stream LLM response with sentence-level TTS pipeline.
 
-    Returns path to captured barge-in audio if interrupted, None otherwise.
+    Returns (barge_in_audio_path, assistant_response_text).
+    barge_in_audio_path is a file path if interrupted, "" if interrupted with no audio, None if not interrupted.
     """
     sentence_q = queue.Queue(maxsize=4)
     audio_q = queue.Queue(maxsize=2)
@@ -215,7 +222,7 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
     interrupted = False
     full_response = []
     try:
-        for sentence in stream_sentences(text):
+        for sentence in stream_sentences(text, history=history):
             full_response.append(sentence)
             if events.has_subscribers():
                 events.publish({"type": "token", "text": sentence})
@@ -254,11 +261,12 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
 
         if full_response:
             events.publish({"type": "transcript", "role": "assistant", "text": " ".join(full_response), "final": True})
+        assistant_text = " ".join(full_response)
         if captured_audio_path:
             print("[interrupted — processing barge-in audio...]")
-            return captured_audio_path[0]
+            return captured_audio_path[0], assistant_text
         print("[interrupted — no audio captured, listening for command...]")
-        return ""
+        return "", assistant_text
 
     # Normal (non-interrupted) path: wait for pipeline to finish,
     # but check for late barge-in so we don't block on a long synthesize().
@@ -281,14 +289,15 @@ def _respond_with_tts(text: str, mic_stream) -> str | None:
     # TTS/playback were still running.  The producer loop never saw the
     # interrupt so `interrupted` stayed False, but the monitor may have
     # captured audio.  Handle it here instead of silently dropping it.
+    assistant_text = " ".join(full_response)
     if interrupt_event.is_set() and captured_audio_path:
         print("[interrupted (late) — processing barge-in audio...]")
-        return captured_audio_path[0]
+        return captured_audio_path[0], assistant_text
     if interrupt_event.is_set():
         print("[interrupted (late) — no audio captured, listening again...]")
-        return ""
+        return "", assistant_text
 
-    return None
+    return None, assistant_text
 
 
 def voice_loop():
@@ -335,6 +344,7 @@ def voice_loop():
                 # ── Conversation loop ──────────────────────────
                 in_conversation = True
                 first_turn = True
+                history: list[dict] = []
 
                 while in_conversation:
                     # Between turns (not first): show "conversing" state
@@ -373,7 +383,11 @@ def voice_loop():
                     print("Jarvis: ", end="", flush=True)
 
                     if config.TTS_ENABLED:
-                        captured_path = _respond_with_tts(text, mic_stream)
+                        captured_path, assistant_text = _respond_with_tts(text, mic_stream, history=history)
+                        history.append({"role": "user", "content": text})
+                        if assistant_text:
+                            history.append({"role": "assistant", "content": assistant_text})
+                        _trim_history(history)
                         # Handle barge-in: let user finish their full thought
                         # before responding (stay in "listening" state)
                         while captured_path is not None:
@@ -405,13 +419,21 @@ def voice_loop():
                             events.publish({"type": "transcript", "role": "user", "text": full_text, "final": True})
                             events.publish({"type": "state", "state": "thinking"})
                             print("Jarvis: ", end="", flush=True)
-                            captured_path = _respond_with_tts(full_text, mic_stream)
+                            captured_path, assistant_text = _respond_with_tts(full_text, mic_stream, history=history)
+                            history.append({"role": "user", "content": full_text})
+                            if assistant_text:
+                                history.append({"role": "assistant", "content": assistant_text})
+                            _trim_history(history)
 
                         if not in_conversation:
                             break
                         # Loop back to listening (conversation continues)
                     else:
-                        query(text, stream=True)
+                        response = query(text, stream=True, history=history)
+                        history.append({"role": "user", "content": text})
+                        if response:
+                            history.append({"role": "assistant", "content": response})
+                        _trim_history(history)
                         print()
 
                 events.publish({"type": "state", "state": "idle"})

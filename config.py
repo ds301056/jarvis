@@ -3,8 +3,10 @@
 import os
 
 # System prompt for LLM chat
-SYSTEM_PROMPT = """You are Jarvis, a helpful voice assistant running on a Mac Mini.
-Keep responses concise and conversational — they will be spoken aloud.
+SYSTEM_PROMPT = """You are Jarvis, a friendly and witty voice assistant running on a Mac Mini.
+You speak naturally, like a real person — warm, casual, with a dry sense of humor when appropriate.
+Keep responses short since they're spoken aloud, but don't be robotic. React to what the user says like a human would.
+If someone asks "how are you?", respond like a friend, not a status report.
 Use tools when the user asks you to do something actionable.
 For simple questions, just answer directly.
 When asked to interact with an app's UI, first use ui_read to see what elements are available, then use ui_click or ui_type to interact with them. Always read before clicking.
@@ -45,7 +47,7 @@ SILENCE_DURATION = 2.0  # seconds of silence before stopping recording
 
 # Barge-in settings (interrupt Jarvis by speaking)
 BARGE_IN_ENABLED = True
-BARGE_IN_THRESHOLD = 1500     # Higher than SILENCE_THRESHOLD to ignore speaker bleed
+BARGE_IN_THRESHOLD = 2500     # Higher than SILENCE_THRESHOLD to ignore speaker bleed + casual remarks
 BARGE_IN_SILENCE_DURATION = 2.0  # seconds of silence before ending barge-in capture (match SILENCE_DURATION)
 
 # Wake word settings
@@ -55,6 +57,7 @@ WAKE_WORD_THRESHOLD = 0.5
 
 # Conversation mode — stay in dialog after wake word until dismissed or timeout
 CONVERSATION_TIMEOUT = 30.0  # seconds of no speech before returning to wake word
+MAX_CONVERSATION_HISTORY = 20  # messages to keep (10 exchanges)
 
 # Dismiss phrases (user wants Jarvis to stop and go back to sleep)
 DISMISS_PHRASES = [
